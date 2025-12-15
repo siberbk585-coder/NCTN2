@@ -3094,105 +3094,110 @@
       const assigneeFilter = document.getElementById('f3-filter-assignee')?.value || '';
       const levelFilter = document.getElementById('f3-filter-level')?.value || 'all';
 
-      const filterEpic = (epic) => {
-        let matches = true;
-        
-        // Lọc theo search term
+      // Kiểm tra item có match với filter không (không bao gồm level filter)
+      const matchesFilters = (item) => {
+        // Kiểm tra search term
         if (searchTerm) {
           const searchFields = [
-            epic.name,
-            epic.assignee,
-            epic.jiraKey,
-            epic.note
+            item.name || '',
+            item.assignee || '',
+            item.jiraKey || '',
+            item.note || ''
           ].join(' ').toLowerCase();
           if (!searchFields.includes(searchTerm)) {
-            matches = false;
+            return false;
           }
         }
 
-        // Lọc theo status
-        if (statusFilter && epic.status && !epic.status.toLowerCase().includes(statusFilter.toLowerCase())) {
-          matches = false;
-        }
-
-        // Lọc theo assignee
-        if (assigneeFilter && epic.assignee !== assigneeFilter) {
-          matches = false;
-        }
-
-        return matches;
-      };
-
-      const filterStory = (story) => {
-        let matches = true;
-        
-        if (searchTerm) {
-          const searchFields = [
-            story.name,
-            story.assignee,
-            story.jiraKey,
-            story.note
-          ].join(' ').toLowerCase();
-          if (!searchFields.includes(searchTerm)) {
-            matches = false;
+        // Kiểm tra status filter
+        if (statusFilter) {
+          if (!item.status || !item.status.toLowerCase().includes(statusFilter.toLowerCase())) {
+            return false;
           }
         }
 
-        if (statusFilter && story.status && !story.status.toLowerCase().includes(statusFilter.toLowerCase())) {
-          matches = false;
+        // Kiểm tra assignee filter
+        if (assigneeFilter) {
+          if (item.assignee !== assigneeFilter) {
+            return false;
+          }
         }
 
-        if (assigneeFilter && story.assignee !== assigneeFilter) {
-          matches = false;
-        }
-
-        return matches;
+        return true;
       };
 
+      // Kiểm tra level filter
+      const matchesLevel = (item) => {
+        if (levelFilter === 'all') return true;
+        if (levelFilter === 'epic') return item.type === 'epic';
+        if (levelFilter === 'story') return item.type === 'story';
+        if (levelFilter === 'subtask') return item.type === 'subtask';
+        return true;
+      };
+
+      // Filter subtask - phải match tất cả filters bao gồm level
       const filterSubtask = (subtask) => {
-        let matches = true;
-        
-        if (searchTerm) {
-          const searchFields = [
-            subtask.name,
-            subtask.assignee,
-            subtask.jiraKey,
-            subtask.note
-          ].join(' ').toLowerCase();
-          if (!searchFields.includes(searchTerm)) {
-            matches = false;
-          }
-        }
-
-        if (statusFilter && subtask.status && !subtask.status.toLowerCase().includes(statusFilter.toLowerCase())) {
-          matches = false;
-        }
-
-        if (assigneeFilter && subtask.assignee !== assigneeFilter) {
-          matches = false;
-        }
-
-        if (levelFilter === 'story' && subtask.type === 'subtask') {
-          matches = false;
-        }
-
-        if (levelFilter === 'subtask' && subtask.type !== 'subtask') {
-          matches = false;
-        }
-
-        return matches;
+        return matchesFilters(subtask) && matchesLevel(subtask);
       };
 
-      const filteredEpics = (F3_ALL_DATA.epics || []).map(epic => {
-        const filteredStories = (epic.stories || []).map(story => {
-          const filteredSubtasks = (story.subtasks || []).filter(filterSubtask);
-          return { ...story, subtasks: filteredSubtasks };
-        }).filter(filterStory);
+      // Filter story - hiển thị nếu story match HOẶC có subtask match
+      const filterStory = (story) => {
+        // Nếu level filter là "epic", không hiển thị story
+        if (levelFilter === 'epic') return false;
+        
+        // Nếu level filter là "story", chỉ kiểm tra story có match không
+        if (levelFilter === 'story') {
+          return matchesFilters(story) && matchesLevel(story);
+        }
+        
+        // Nếu level filter là "subtask", chỉ hiển thị story nếu có subtask match
+        if (levelFilter === 'subtask') {
+          // Story phải có ít nhất một subtask match
+          return (story.subtasks || []).some(filterSubtask);
+        }
+        
+        // Level filter là "all" - hiển thị story nếu story match HOẶC có subtask match
+        const storyMatches = matchesFilters(story);
+        const hasMatchingSubtasks = (story.subtasks || []).some(filterSubtask);
+        return storyMatches || hasMatchingSubtasks;
+      };
 
+      // Filter epic - hiển thị nếu epic match HOẶC có story/subtask match
+      const filterEpic = (epic) => {
+        // Nếu level filter là "epic", chỉ kiểm tra epic có match không
+        if (levelFilter === 'epic') {
+          return matchesFilters(epic) && matchesLevel(epic);
+        }
+        
+        // Nếu level filter là "story" hoặc "subtask", chỉ hiển thị epic nếu có children match
+        if (levelFilter === 'story' || levelFilter === 'subtask') {
+          return (epic.stories || []).some(filterStory);
+        }
+        
+        // Level filter là "all" - hiển thị epic nếu epic match HOẶC có story/subtask match
+        const epicMatches = matchesFilters(epic);
+        const hasMatchingChildren = (epic.stories || []).some(filterStory);
+        return epicMatches || hasMatchingChildren;
+      };
+
+      // Áp dụng filter từ dưới lên (subtask -> story -> epic)
+      // Đảm bảo chỉ giữ lại các subtask match, sau đó filter story, cuối cùng filter epic
+      const filteredEpics = (F3_ALL_DATA.epics || []).map(epic => {
+        // Filter stories và subtasks của chúng
+        const filteredStories = (epic.stories || []).map(story => {
+          // Luôn filter subtasks trước
+          const filteredSubtasks = (story.subtasks || []).filter(filterSubtask);
+          // Trả về story với subtasks đã được filter
+          return { ...story, subtasks: filteredSubtasks };
+        }).filter(filterStory); // Sau đó filter stories
+
+        // Trả về epic với stories đã được filter
         return { ...epic, stories: filteredStories };
-      }).filter(filterEpic);
+      }).filter(filterEpic); // Cuối cùng filter epics
 
       F3_FILTERED_DATA = { epics: filteredEpics };
+      
+      // Render lại bảng với dữ liệu đã filter
       renderF3Table();
     }
 
@@ -3307,10 +3312,42 @@
       
       if (f3LoadBtn) f3LoadBtn.addEventListener('click', loadF3Data);
       if (f3ExportBtn) f3ExportBtn.addEventListener('click', exportF3ToExcel);
-      if (f3SearchInput) f3SearchInput.addEventListener('input', filterF3Data);
-      if (f3FilterStatus) f3FilterStatus.addEventListener('change', filterF3Data);
-      if (f3FilterAssignee) f3FilterAssignee.addEventListener('change', filterF3Data);
-      if (f3FilterLevel) f3FilterLevel.addEventListener('change', filterF3Data);
+      
+      // Debounce cho search input để tránh filter quá nhiều lần
+      let searchTimeout = null;
+      if (f3SearchInput) {
+        f3SearchInput.addEventListener('input', (e) => {
+          clearTimeout(searchTimeout);
+          searchTimeout = setTimeout(() => {
+            filterF3Data();
+          }, 300); // Đợi 300ms sau khi người dùng ngừng gõ
+        });
+        
+        // Cho phép Enter để filter ngay lập tức
+        f3SearchInput.addEventListener('keydown', (e) => {
+          if (e.key === 'Enter') {
+            clearTimeout(searchTimeout);
+            filterF3Data();
+          }
+        });
+      }
+      
+      // Các filter khác áp dụng ngay lập tức
+      if (f3FilterStatus) {
+        f3FilterStatus.addEventListener('change', () => {
+          filterF3Data();
+        });
+      }
+      if (f3FilterAssignee) {
+        f3FilterAssignee.addEventListener('change', () => {
+          filterF3Data();
+        });
+      }
+      if (f3FilterLevel) {
+        f3FilterLevel.addEventListener('change', () => {
+          filterF3Data();
+        });
+      }
 
       // Modal Declaration event listeners
       const modalF3Declaration = document.getElementById('modal-f3-declaration');
