@@ -494,10 +494,17 @@
               <p class="text-sm text-gray-600">Thống kê và theo dõi tiến độ dự án, tác vụ</p>
             </div>
           </div>
-          <button id="f6-refresh-btn" class="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium">
-            <span class="material-icons text-lg">refresh</span>
-            <span>Tải lại</span>
-          </button>
+          <div class="flex items-center gap-2">
+            <button id="f6-load-btn" class="flex items-center gap-2 px-4 py-2 bg-green-50 text-green-600 rounded-lg hover:bg-green-100 transition-colors text-sm font-medium">
+              <span class="material-icons text-lg">upload_file</span>
+              <span>Tải dữ liệu</span>
+            </button>
+            <input type="file" id="f6-file-input" accept=".txt,.json" style="display: none;">
+            <button id="f6-refresh-btn" class="flex items-center gap-2 px-4 py-2 bg-blue-50 text-blue-600 rounded-lg hover:bg-blue-100 transition-colors text-sm font-medium">
+              <span class="material-icons text-lg">refresh</span>
+              <span>Tải lại</span>
+            </button>
+          </div>
         </div>
 
         <!-- Stats Cards -->
@@ -969,8 +976,8 @@
       "Giang Văn Toàn",
       "Vũ Ngọc Diệp",
       "Bùi Ngọc Hùng",
-      "Nhân Viên Mới 1",
-      "Nhân Viên Mới 2",
+      "Nguyễn Thế Việt",
+      "Nguyễn Mạnh Quang",
     ];
 
     // Names - Form 2 (NCTN 2) - Danh sách riêng biệt
@@ -982,8 +989,8 @@
       "Giang Văn Toàn",
       "Vũ Ngọc Diệp",
       "Bùi Ngọc Hùng",
-      "Nhân Viên Mới 1",
-      "Nhân Viên Mới 2",
+      "Nguyễn Thế Việt",
+      "Nguyễn Mạnh Quang",
     ];
     
 
@@ -1784,16 +1791,21 @@
           console.log('[Form2 Debug] Trying JSONP:', base);
           const result = await jsonpPromise;
           if (result.parsed && hasMeaningfulRows(result.parsed)) {
+            console.log('[Form2 Debug] JSONP succeeded');
             return result;
           }
         } catch (e) {
-          console.log('[Form2 Debug] JSONP failed:', e.message);
+          // Chỉ log nếu không phải timeout (timeout là bình thường khi JSONP không được hỗ trợ)
+          if (e.message !== 'JSONP_TIMEOUT') {
+            console.log('[Form2 Debug] JSONP failed:', e.message);
+          }
         }
 
-        // Fallback: Thử fetch trực tiếp như Form 5
+        // Fallback: Thử fetch trực tiếp - ưu tiên webhook chính trước
         const urlProd = base.includes('/webhook/') ? base : base.replace('/webhook-test/', '/webhook/');
         const urlTest = base.includes('/webhook-test/') ? base : base.replace('/webhook/', '/webhook-test/');
-        const urls = [urlTest, urlProd];
+        // Ưu tiên webhook chính trước để tránh lỗi CORS không cần thiết
+        const urls = [urlProd, urlTest];
         
         let lastErr = null;
         const hasMeaningfulRows = (obj)=>{
@@ -1820,7 +1832,9 @@
               headers: {
                 'Accept': 'application/json, text/plain, */*',
                 'Content-Type': 'application/json'
-              }
+              },
+              // Thêm mode để xử lý CORS tốt hơn
+              mode: 'cors'
             });
             const text = await r.text();
             if (!r.ok) throw new Error(`HTTP ${r.status}: ${text}`);
@@ -1834,10 +1848,15 @@
             }
             if (!parsed) throw new Error('INVALID_JSON');
             if (!hasMeaningfulRows(parsed)) throw new Error('NO_ROWS_FOUND');
+            console.log('[Form2 Debug] Successfully fetched from:', url);
             return { parsed, source: url };
           } catch (e) {
             lastErr = e;
-            console.log('[Form2 Debug] Fetch failed:', e.message);
+            // Chỉ log lỗi CORS nếu không phải là lỗi CORS (để tránh spam console)
+            if (!e.message.includes('CORS') && !e.message.includes('Failed to fetch')) {
+              console.log('[Form2 Debug] Fetch failed:', e.message);
+            }
+            // Nếu đã thành công với URL đầu tiên, không cần thử URL thứ hai
             continue;
           }
         }
@@ -2700,7 +2719,8 @@
               jiraKey: getValue(['jira_key', 'Mã Jira/KOI', 'Jira Key', 'jiraKey', 'mã jira', 'Jira']),
               jiraLink: getValue(['jira_link', 'jiraLink', 'Link jira', 'link jira']),
               taskCode: getValue(['task_code', 'taskCode', 'Task Code', 'task code']),
-              note: getValue(['note', 'Ghi chú', 'Note', 'ghi chú'])
+              note: getValue(['note', 'Ghi chú', 'Note', 'ghi chú']),
+              isCanceled: getValue(['is_canceled', 'isCanceled', 'Is Canceled', 'is_canceled']) === 'true' || getValue(['is_canceled', 'isCanceled', 'Is Canceled', 'is_canceled']) === true
             });
           }
         }
@@ -2754,7 +2774,11 @@
           <div class="col-span-1 flex items-center text-sm text-gray-600">${formatF3Date(item.startDate)}</div>
           <div class="col-span-1 flex items-center text-sm text-gray-600">${formatF3Date(item.dueDate)}</div>
           <div class="col-span-1 flex items-center text-sm text-gray-600">${formatF3Date(item.completedDate)}</div>
-          <div class="col-span-1 flex items-center text-sm text-gray-700">${escapeHtml(item.jiraKey || '-')}</div>
+          <div class="col-span-1 flex items-center text-sm text-gray-700">
+            ${item.jiraKey && item.jiraKey !== '' 
+              ? `<a href="${escapeHtml(item.jiraLink || '#')}" target="_blank" class="text-xs font-medium text-primary-blue hover:underline">${escapeHtml(item.jiraKey)}</a>` 
+              : '-'}
+          </div>
           <div class="col-span-1 flex items-center text-sm text-gray-600">${escapeHtml((item.note || '').substring(0, 30))}${(item.note || '').length > 30 ? '...' : ''}</div>
         </div>
       `;
@@ -3396,13 +3420,44 @@
             
             await updateF3Subtask(F3_CURRENT_SUBTASK_ID, payload);
 
+            // Cập nhật dữ liệu local ngay lập tức trong F3_ALL_DATA
+            const updatedResult = findF3ItemById(F3_CURRENT_SUBTASK_ID);
+            if (updatedResult && updatedResult.item) {
+              // Lưu giá trị cũ để debug
+              const oldJiraKey = updatedResult.item.jiraKey;
+              
+              // Cập nhật trực tiếp vào object trong F3_ALL_DATA
+              updatedResult.item.status = status;
+              updatedResult.item.jiraKey = jiraKey || '';
+              updatedResult.item.jiraLink = jiraLink || '';
+              updatedResult.item.note = note || '';
+              
+              console.log('[Form 3] Cập nhật dữ liệu local:');
+              console.log('  - Subtask ID:', F3_CURRENT_SUBTASK_ID);
+              console.log('  - jiraKey cũ:', oldJiraKey);
+              console.log('  - jiraKey mới:', updatedResult.item.jiraKey);
+              console.log('  - status:', updatedResult.item.status);
+              console.log('  - Item object:', updatedResult.item);
+              
+              // Áp dụng lại filter để tạo lại F3_FILTERED_DATA từ F3_ALL_DATA đã cập nhật
+              // Hàm filterF3Data() sẽ tự động gọi renderF3Table() ở cuối
+              filterF3Data();
+            } else {
+              console.error('[Form 3] Không tìm thấy item để cập nhật:', F3_CURRENT_SUBTASK_ID);
+              console.error('[Form 3] F3_ALL_DATA:', F3_ALL_DATA);
+              // Nếu không tìm thấy, vẫn render lại để đảm bảo UI được cập nhật
+              renderF3Table();
+            }
+
             showToast('Cập nhật thông tin thành công', 'success');
             
             // Đóng modal
             closeF3DeclarationModal();
 
-            // Tải lại dữ liệu
-            await loadF3Data();
+            // Tải lại dữ liệu từ server để đồng bộ (chạy ngầm)
+            loadF3Data().catch(err => {
+              console.error('Lỗi khi tải lại dữ liệu:', err);
+            });
           } catch (error) {
             console.error('[Form 3] Error updating subtask:', error);
             showToast('Lỗi khi cập nhật: ' + error.message, 'error');
@@ -3683,10 +3738,52 @@
       subtaskStatus: null,
       picDistribution: null
     };
+    
+    // Dữ liệu từ file JSON cho Form 6
+    let F6_DATA = null;
 
-    // Tính toán thống kê từ dữ liệu Form 3
+    // Load dữ liệu từ file JSON (mở file picker)
+    function loadF6DataFromFile() {
+      const fileInput = document.getElementById('f6-file-input');
+      if (fileInput) {
+        fileInput.click();
+      } else {
+        showToast('Không tìm thấy file input', 'error');
+      }
+    }
+
+    // Load dữ liệu từ file input
+    function handleF6FileInput(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = function(e) {
+        try {
+          const text = e.target.result;
+          const jsonData = JSON.parse(text);
+          
+          // Chuyển đổi dữ liệu phẳng sang format phân cấp
+          F6_DATA = organizeF3Data(jsonData);
+          updateF6Dashboard();
+          showToast('Đã tải dữ liệu thành công', 'success');
+        } catch (error) {
+          console.error('Lỗi khi parse JSON:', error);
+          showToast('Lỗi định dạng file JSON', 'error');
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    // Lấy dữ liệu để sử dụng (ưu tiên F6_DATA, fallback về F3_ALL_DATA)
+    function getF6Data() {
+      return F6_DATA || F3_ALL_DATA;
+    }
+
+    // Tính toán thống kê từ dữ liệu
     function calculateF6Stats() {
-      if (!F3_ALL_DATA || !F3_ALL_DATA.epics || F3_ALL_DATA.epics.length === 0) {
+      const data = getF6Data();
+      if (!data || !data.epics || data.epics.length === 0) {
         return {
           totalEpics: 0,
           totalStories: 0,
@@ -3696,21 +3793,26 @@
         };
       }
 
-      let totalEpics = F3_ALL_DATA.epics.length;
+      let totalEpics = data.epics.length;
       let totalStories = 0;
       let totalSubtasks = 0;
       let completedSubtasks = 0;
 
-      F3_ALL_DATA.epics.forEach(epic => {
+      data.epics.forEach(epic => {
         if (epic.stories && epic.stories.length > 0) {
           totalStories += epic.stories.length;
           epic.stories.forEach(story => {
             if (story.subtasks && story.subtasks.length > 0) {
-              totalSubtasks += story.subtasks.length;
               story.subtasks.forEach(subtask => {
+                const isCanceled = subtask.isCanceled === true || subtask.isCanceled === 'true';
                 const status = (subtask.status || '').toLowerCase();
-                if (status.includes('hoàn thành') || status.includes('completed')) {
-                  completedSubtasks++;
+                
+                // Không tính các subtask đã hủy vào tổng số
+                if (!isCanceled && !status.includes('hủy') && !status.includes('cancel')) {
+                  totalSubtasks++;
+                  if (status.includes('hoàn thành') || status.includes('completed')) {
+                    completedSubtasks++;
+                  }
                 }
               });
             }
@@ -3755,23 +3857,28 @@
         'Đã hủy': 0
       };
 
-      if (F3_ALL_DATA && F3_ALL_DATA.epics) {
-        F3_ALL_DATA.epics.forEach(epic => {
+      const data = getF6Data();
+      if (data && data.epics) {
+        data.epics.forEach(epic => {
           if (epic.stories) {
             epic.stories.forEach(story => {
               if (story.subtasks) {
                 story.subtasks.forEach(subtask => {
                   const status = subtask.status || '';
                   const statusLower = status.toLowerCase();
+                  const isCanceled = subtask.isCanceled === true || subtask.isCanceled === 'true';
                   
-                  if (statusLower.includes('hoàn thành') || statusLower.includes('completed')) {
+                  if (isCanceled || statusLower.includes('hủy') || statusLower.includes('cancel')) {
+                    statusCount['Đã hủy']++;
+                  } else if (statusLower.includes('hoàn thành') || statusLower.includes('completed')) {
                     statusCount['Hoàn thành']++;
                   } else if (statusLower.includes('đang triển khai') || statusLower.includes('in progress')) {
                     statusCount['Đang triển khai']++;
                   } else if (statusLower.includes('chưa triển khai') || statusLower.includes('not started')) {
                     statusCount['Chưa triển khai']++;
-                  } else if (statusLower.includes('hủy') || statusLower.includes('cancel')) {
-                    statusCount['Đã hủy']++;
+                  } else {
+                    // Mặc định là chưa triển khai nếu không xác định được
+                    statusCount['Chưa triển khai']++;
                   }
                 });
               }
@@ -3791,8 +3898,9 @@
     function getF6PicDistributionData() {
       const picCount = {};
 
-      if (F3_ALL_DATA && F3_ALL_DATA.epics) {
-        F3_ALL_DATA.epics.forEach(epic => {
+      const data = getF6Data();
+      if (data && data.epics) {
+        data.epics.forEach(epic => {
           if (epic.assignee) {
             picCount[epic.assignee] = (picCount[epic.assignee] || 0) + 1;
           }
@@ -3936,23 +4044,30 @@
       const sevenDaysLater = new Date(today);
       sevenDaysLater.setDate(today.getDate() + 7);
 
-      if (F3_ALL_DATA && F3_ALL_DATA.epics) {
-        F3_ALL_DATA.epics.forEach(epic => {
+      const data = getF6Data();
+      if (data && data.epics) {
+        data.epics.forEach(epic => {
           if (epic.stories) {
             epic.stories.forEach(story => {
               if (story.subtasks) {
                 story.subtasks.forEach(subtask => {
-                  if (subtask.dueDate) {
-                    const dueDate = new Date(subtask.dueDate);
-                    if (dueDate >= today && dueDate <= sevenDaysLater) {
-                      const daysLeft = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
-                      dueTasks.push({
-                        name: subtask.name,
-                        epic: epic.name,
-                        assignee: subtask.assignee || '-',
-                        dueDate: subtask.dueDate,
-                        daysLeft: daysLeft
-                      });
+                  const isCanceled = subtask.isCanceled === true || subtask.isCanceled === 'true';
+                  const status = (subtask.status || '').toLowerCase();
+                  
+                  // Bỏ qua các subtask đã hủy
+                  if (!isCanceled && !status.includes('hủy') && !status.includes('cancel')) {
+                    if (subtask.dueDate) {
+                      const dueDate = new Date(subtask.dueDate);
+                      if (dueDate >= today && dueDate <= sevenDaysLater) {
+                        const daysLeft = Math.ceil((dueDate - today) / (1000 * 60 * 60 * 24));
+                        dueTasks.push({
+                          name: subtask.name,
+                          epic: epic.name,
+                          assignee: subtask.assignee || '-',
+                          dueDate: subtask.dueDate,
+                          daysLeft: daysLeft
+                        });
+                      }
                     }
                   }
                 });
@@ -4001,12 +4116,13 @@
       const tbody = document.getElementById('f6-projects-table-body');
       if (!tbody) return;
 
-      if (!F3_ALL_DATA || !F3_ALL_DATA.epics || F3_ALL_DATA.epics.length === 0) {
+      const data = getF6Data();
+      if (!data || !data.epics || data.epics.length === 0) {
         tbody.innerHTML = '<tr><td colspan="6" class="px-6 py-4 text-center text-gray-500">Chưa có dữ liệu</td></tr>';
         return;
       }
 
-      tbody.innerHTML = F3_ALL_DATA.epics.map(epic => {
+      tbody.innerHTML = data.epics.map(epic => {
         let totalStories = 0;
         let totalSubtasks = 0;
         let completedSubtasks = 0;
@@ -4015,11 +4131,16 @@
           totalStories = epic.stories.length;
           epic.stories.forEach(story => {
             if (story.subtasks) {
-              totalSubtasks += story.subtasks.length;
               story.subtasks.forEach(subtask => {
+                const isCanceled = subtask.isCanceled === true || subtask.isCanceled === 'true';
                 const status = (subtask.status || '').toLowerCase();
-                if (status.includes('hoàn thành') || status.includes('completed')) {
-                  completedSubtasks++;
+                
+                // Không tính các subtask đã hủy vào tổng số
+                if (!isCanceled && !status.includes('hủy') && !status.includes('cancel')) {
+                  totalSubtasks++;
+                  if (status.includes('hoàn thành') || status.includes('completed')) {
+                    completedSubtasks++;
+                  }
                 }
               });
             }
@@ -4059,10 +4180,11 @@
       renderF6ProjectsTable();
     }
 
-    // Tải lại dữ liệu Form 6 (sử dụng dữ liệu từ Form 3)
+    // Tải lại dữ liệu Form 6
     function refreshF6Data() {
-      if (!F3_ALL_DATA || !F3_ALL_DATA.epics || F3_ALL_DATA.epics.length === 0) {
-        showToast('Vui lòng tải dữ liệu Form 3 trước', 'info');
+      const data = getF6Data();
+      if (!data || !data.epics || data.epics.length === 0) {
+        showToast('Vui lòng tải dữ liệu trước', 'info');
         return;
       }
       updateF6Dashboard();
@@ -4072,10 +4194,20 @@
     // Form 6 Event Listeners
     function initF6EventListeners() {
       const f6RefreshBtn = document.getElementById('f6-refresh-btn');
+      const f6LoadBtn = document.getElementById('f6-load-btn');
+      const f6FileInput = document.getElementById('f6-file-input');
       const f6SearchInput = document.getElementById('f6-search-input');
 
       if (f6RefreshBtn) {
         f6RefreshBtn.addEventListener('click', refreshF6Data);
+      }
+
+      if (f6LoadBtn) {
+        f6LoadBtn.addEventListener('click', loadF6DataFromFile);
+      }
+
+      if (f6FileInput) {
+        f6FileInput.addEventListener('change', handleF6FileInput);
       }
 
       if (f6SearchInput) {
@@ -4237,8 +4369,8 @@
                 <option>Giang Văn Toàn</option>
                 <option>Vũ Ngọc Diệp</option>
                 <option>Bùi Ngọc Hùng</option>
-                <option>Nhân Viên Mới 1</option>
-                <option>Nhân Viên Mới 2</option>
+                <option>Nguyễn Thế Việt</option>
+                <option>Nguyễn Mạnh Quang</option>
               </select>
             </div>
             
@@ -4325,14 +4457,14 @@
               <select id="modal-f3-add-subtask-assignee" required class="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
                 <option value="">Chọn người thực hiện</option>
                 <option>Trần Văn Hoàng</option>
+                <option>Nguyễn Thế Việt</option>
+                <option>Nguyễn Mạnh Quang</option>
                 <option>Nguyễn Kim Cương</option>
                 <option>Trịnh Xuân Hạnh</option>
                 <option>Đỗ Xuân Huy</option>
                 <option>Giang Văn Toàn</option>
                 <option>Vũ Ngọc Diệp</option>
                 <option>Bùi Ngọc Hùng</option>
-                <option>Nhân Viên Mới 1</option>
-                <option>Nhân Viên Mới 2</option>
               </select>
             </div>
             
